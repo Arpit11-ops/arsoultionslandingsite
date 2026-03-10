@@ -1,6 +1,13 @@
 import Swup from 'swup';
 const swup = new Swup();
 
+/* ── GLOBAL STATE FOR MEMORY MANAGEMENT ── */
+let currentRafId = null;
+let heroIntervalId = null;
+let numbersIntervalId = null;
+let isAnimating = true;
+let activeObservers = [];
+
 /* ── GLOBAL FUNCTIONS ── */
 window.toggleMobileMenu = function() {
   const nav = document.getElementById('mobileNav');
@@ -9,146 +16,46 @@ window.toggleMobileMenu = function() {
   }
 };
 
-/* ── HERO CANVAS: Light beams animation ── */
-(function(){
-  const canvas = document.getElementById('hero-canvas');
-  if (!canvas) return; // Error handling: Ensure canvas exists before initializing
-  
-  const ctx = canvas.getContext('2d');
-  const parent = canvas.parentElement;
-
-  function resize(){
-    if (!parent) return;
-    canvas.width = parent.offsetWidth;
-    canvas.height = parent.offsetHeight;
+/* ── CLEANUP (Runs before every page transition) ── */
+function cleanup() {
+  if (currentRafId) {
+    cancelAnimationFrame(currentRafId);
+    currentRafId = null;
   }
-  resize();
-  window.addEventListener('resize', resize);
-
-  const beams = [
-    { angle: -18, color: '#1a6fff', width: 120, speed: .3, offset: 0, alpha: .7 },
-    { angle: -15, color: '#2563EB', width: 80, speed: .5, offset: 0.3, alpha: .5 },
-    { angle: -12, color: '#60A5FA', width: 60, speed: .4, offset: 0.6, alpha: .4 },
-    { angle: -20, color: '#06B6D4', width: 100, speed: .6, offset: 0.9, alpha: .6 },
-    { angle: -14, color: '#818CF8', width: 50, speed: .35, offset: 1.2, alpha: .35 },
-    { angle: -22, color: '#3B82F6', width: 140, speed: .25, offset: 1.5, alpha: .45 },
-    { angle: -10, color: '#0EA5E9', width: 45, speed: .55, offset: 1.8, alpha: .3 },
-    // warm accent
-    { angle: -16, color: '#F97316', width: 30, speed: .4, offset: 2.1, alpha: .5, warm: true },
-    { angle: -14, color: '#EF4444', width: 20, speed: .45, offset: 2.4, alpha: .4, warm: true },
-    { angle: -19, color: '#EC4899', width: 25, speed: .5, offset: 2.7, alpha: .35, warm: true },
-  ];
-
-  let t = 0;
-  const vanishX = canvas.width;
-  const vanishY = canvas.height * .45;
-
-  function drawBeam(beam, t){
-    const W = canvas.width, H = canvas.height;
-    const phase = (t * beam.speed + beam.offset) % 4;
-    // origin on left edge, spread top to bottom
-    const originY = H * 0.35 + Math.sin(t * .2 + beam.offset) * H * .08;
-    const originX = -20;
-
-    ctx.save();
-    ctx.globalAlpha = beam.alpha * (0.6 + 0.4 * Math.sin(t * .8 + beam.offset));
-
-    const gradient = ctx.createLinearGradient(originX, originY, W + 100, vanishY);
-    gradient.addColorStop(0, beam.color);
-    gradient.addColorStop(0.15, beam.color);
-    gradient.addColorStop(0.7, beam.color + '44');
-    gradient.addColorStop(1, 'transparent');
-
-    ctx.beginPath();
-    // beam as a thin wedge
-    const spread = beam.width * 0.5;
-    const angleRad = (beam.angle * Math.PI) / 180;
-    const endX = W + 200;
-    const endY1 = vanishY + Math.tan(angleRad) * (endX - originX) - spread * 0.05;
-    const endY2 = vanishY + Math.tan(angleRad) * (endX - originX) + spread * 0.05;
-
-    ctx.moveTo(originX, originY - spread);
-    ctx.lineTo(endX, endY1);
-    ctx.lineTo(endX, endY2);
-    ctx.lineTo(originX, originY + spread);
-    ctx.closePath();
-
-    ctx.fillStyle = gradient;
-    ctx.filter = 'blur(8px)';
-    ctx.fill();
-    ctx.restore();
+  if (heroIntervalId) {
+    clearInterval(heroIntervalId);
+    heroIntervalId = null;
   }
-
-  function drawGlow(){
-    // Central bright line
-    const W = canvas.width, H = canvas.height;
-    const y = H * .44;
-    ctx.save();
-    const glowGrad = ctx.createLinearGradient(0, y, W, y);
-    glowGrad.addColorStop(0, '#FF6B3580');
-    glowGrad.addColorStop(0.05, '#FFFFFF');
-    glowGrad.addColorStop(0.5, '#06B6D4');
-    glowGrad.addColorStop(1, 'transparent');
-    ctx.globalAlpha = .9;
-    ctx.beginPath();
-    ctx.moveTo(0, y - 1.5);
-    ctx.lineTo(W, y - .5);
-    ctx.lineTo(W, y + .5);
-    ctx.lineTo(0, y + 1.5);
-    ctx.closePath();
-    ctx.fillStyle = glowGrad;
-    ctx.filter = 'blur(1px)';
-    ctx.fill();
-    // halo
-    ctx.globalAlpha = .15;
-    ctx.beginPath();
-    ctx.moveTo(0, y - 8);
-    ctx.lineTo(W * .3, y - 4);
-    ctx.lineTo(W * .3, y + 4);
-    ctx.lineTo(0, y + 8);
-    ctx.closePath();
-    ctx.fillStyle = '#FF6B35';
-    ctx.filter = 'blur(4px)';
-    ctx.fill();
-    ctx.restore();
+  if (numbersIntervalId) {
+    clearInterval(numbersIntervalId);
+    numbersIntervalId = null;
   }
+  activeObservers.forEach(obs => obs.disconnect());
+  activeObservers = [];
+}
 
-  function animate(){
-    requestAnimationFrame(animate);
-    t += .015;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    // dark bg
-    ctx.fillStyle = '#040D1F';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    // slight radial glow center
-    const rg = ctx.createRadialGradient(canvas.width*.6, canvas.height*.4, 0, canvas.width*.6, canvas.height*.4, canvas.width*.5);
-    rg.addColorStop(0, 'rgba(37,99,235,.12)');
-    rg.addColorStop(1, 'transparent');
-    ctx.fillStyle = rg;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+/* ── FEATURE MODULES ── */
 
-    beams.forEach(b => drawBeam(b, t));
-    drawGlow();
-  }
-  animate();
-})();
+function initCanvas() {
+  // Video background replaces canvas. No initialization needed here.
+}
 
-/* ── INIT FUNCTION FOR PAGE TRANSITIONS ── */
-function init() {
-  // 1. SCROLL REVEAL
+function initReveal() {
   const obs = new IntersectionObserver(entries => {
     entries.forEach(e => { if(e.isIntersecting) e.target.classList.add('in'); });
   }, {threshold: .08});
+  activeObservers.push(obs);
   document.querySelectorAll('.reveal').forEach(el => obs.observe(el));
+}
 
-  // 2. DIGIT WHEEL ANIMATION
+function initDigits() {
   const digits = ['d1','d2','d3','d4','d5','d6','d7'];
   const targets = [7,4,9,5,2,2,7];
   function animateDigits(){
     digits.forEach((id, i) => {
       const el = document.getElementById(id);
-      if (!el) return; // Error handling: check if digit element exists on current page
-      let n = 0, steps = 0;
+      if (!el) return;
+      let steps = 0;
       const max = 20 + i * 5;
       const iv = setInterval(() => {
         el.textContent = Math.floor(Math.random() * 10);
@@ -161,33 +68,144 @@ function init() {
   const digitObs = new IntersectionObserver(entries => {
     entries.forEach(e => { if(e.isIntersecting){ animateDigits(); digitObs.disconnect(); } });
   }, {threshold:.3});
+  activeObservers.push(digitObs);
   
   const capCard = document.querySelector('.dk-card.capital');
-  if(capCard) {
-    digitObs.observe(capCard);
-  }
+  if(capCard) digitObs.observe(capCard);
+}
 
-  // 3. FORM HANDLING
+function initForm() {
   const contactForm = document.getElementById('contactForm');
-  if (contactForm) {
-    // Only attach if not already attached to prevent duplicates on swup view
-    if (!contactForm.dataset.initialized) {
-      contactForm.dataset.initialized = "true";
-      contactForm.addEventListener('submit', (e) => {
-        e.preventDefault();
-        alert('Thank you! Your message has been sent. We will contact you shortly.');
-        contactForm.reset();
-      });
-    }
+  if (contactForm && !contactForm.dataset.initialized) {
+    contactForm.dataset.initialized = "true";
+    contactForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      alert('Thank you! Your message has been sent. We will contact you shortly.');
+      contactForm.reset();
+    });
   }
 }
 
-// Run on initial load
+function initHeroCard() {
+  const heroCard = document.getElementById('hero-revenue-card');
+  if (!heroCard || heroIntervalId) return;
+
+  const cardData = [
+    { title: "Experience", amount: "10+ Years", period: "in Web & App Development", pct: "100%", label: "Satisfaction" },
+    { title: "Delivery", amount: "500+", period: "Global Projects Completed", pct: "24/7", label: "Support" },
+    { title: "Growth", amount: "10x", period: "Average Client Traffic Growth", pct: "#1", label: "Rankings" }
+  ];
+
+  let currentIndex = 0;
+  const titleEl = document.getElementById('rc-title');
+  const amountEl = document.getElementById('rc-amount');
+  const periodEl = document.getElementById('rc-period');
+  const badgeEl = document.getElementById('rc-badge');
+  const pctEl = document.getElementById('rc-pct');
+  const labelEl = document.getElementById('rc-badge-label');
+  const dots = document.querySelectorAll('#rc-dots .rc-dot');
+  const animElements = [titleEl, amountEl, periodEl, badgeEl];
+
+  heroIntervalId = setInterval(() => {
+    // Slide out (up)
+    animElements.forEach(el => { if (el) el.classList.add('fade-out'); });
+
+    setTimeout(() => {
+      currentIndex = (currentIndex + 1) % cardData.length;
+      const data = cardData[currentIndex];
+
+      if (titleEl) titleEl.innerText = data.title;
+      if (amountEl) amountEl.innerText = data.amount;
+      if (periodEl) periodEl.innerText = data.period;
+      if (pctEl) pctEl.innerText = data.pct;
+      if (labelEl) labelEl.innerText = data.label;
+
+      dots.forEach((dot, idx) => {
+        if (idx === currentIndex) dot.classList.add('active');
+        else dot.classList.remove('active');
+      });
+
+      // Teleport
+      animElements.forEach(el => {
+        if (el) {
+          el.classList.remove('fade-out');
+          el.classList.add('fade-in-pre');
+        }
+      });
+
+      if (titleEl) void titleEl.offsetWidth; // Force reflow
+
+      // Slide in
+      animElements.forEach(el => { if (el) el.classList.remove('fade-in-pre'); });
+    }, 500);
+  }, 4500);
+}
+
+function initNumbersAnimation() {
+  const numSection = document.getElementById('num-section');
+  if (!numSection || numbersIntervalId) return;
+
+  const numData = [
+    { num: "10", label: "Years of Excellence" },
+    { num: "500+", label: "Projects Completed" },
+    { num: "100%", label: "Satisfaction Guarantee" }
+  ];
+
+  let currentIndex = 0;
+  const numEl = document.getElementById('big-num');
+  const labelEl = document.getElementById('num-label');
+  const dots = document.querySelectorAll('#num-dots-container .num-dot');
+  const animElements = [numEl, labelEl];
+
+  numbersIntervalId = setInterval(() => {
+    // Slide out (up)
+    animElements.forEach(el => { if (el) el.classList.add('fade-out'); });
+
+    setTimeout(() => {
+      currentIndex = (currentIndex + 1) % numData.length;
+      const data = numData[currentIndex];
+
+      if (numEl) numEl.innerText = data.num;
+      if (labelEl) labelEl.innerText = data.label;
+
+      dots.forEach((dot, idx) => {
+        if (idx === currentIndex) dot.classList.add('on');
+        else dot.classList.remove('on');
+      });
+
+      // Teleport
+      animElements.forEach(el => {
+        if (el) {
+          el.classList.remove('fade-out');
+          el.classList.add('fade-in-pre');
+        }
+      });
+
+      if (numEl) void numEl.offsetWidth; // Force reflow
+
+      // Slide in
+      animElements.forEach(el => { if (el) el.classList.remove('fade-in-pre'); });
+    }, 500);
+  }, 4500);
+}
+
+/* ── MAIN INITIALIZATION ── */
+function init() {
+  cleanup();
+  initCanvas();
+  initReveal();
+  initDigits();
+  initForm();
+  initHeroCard();
+  initNumbersAnimation();
+}
+
+// Map bindings
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', init);
 } else {
   init();
 }
 
-// Run on Swup page transitions
 swup.hooks.on('page:view', init);
+swup.hooks.on('visit:start', cleanup);
